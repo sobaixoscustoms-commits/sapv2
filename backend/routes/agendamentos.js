@@ -2,73 +2,105 @@
 
 const express = require("express");
 const router = express.Router();
-const db = require("../db");
+const pool = require("../db");
 const { auth, role } = require("../middleware/auth");
 
 router.use(auth);
 
 // GET /api/agendamentos?data=&status=&q=
-router.get("/", (req, res) => {
-  const q = `%${req.query.q || ""}%`;
-  const data = req.query.data || null;
-  let sql = "SELECT * FROM agendamentos WHERE (cliente_nome LIKE ? OR servico LIKE ?)";
-  const params = [q, q];
-  if (data) { sql += " AND data = ?"; params.push(data); }
-  sql += " ORDER BY data, hora";
-  res.json(db.prepare(sql).all(...params));
+router.get("/", async (req, res) => {
+  try {
+    const q = `%${req.query.q || ""}%`;
+    const data = req.query.data || null;
+    let sql = "SELECT * FROM agendamentos WHERE (cliente_nome ILIKE $1 OR servico ILIKE $2)";
+    const params = [q, q];
+    if (data) { sql += " AND data = $3"; params.push(data); }
+    sql += " ORDER BY data, hora";
+    const { rows } = await pool.query(sql, params);
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ erro: "Erro interno." });
+  }
 });
 
 // GET /api/agendamentos/:id
-router.get("/:id", (req, res) => {
-  const row = db.prepare("SELECT * FROM agendamentos WHERE id = ?").get(req.params.id);
-  if (!row) return res.status(404).json({ erro: "Agendamento não encontrado." });
-  res.json(row);
+router.get("/:id", async (req, res) => {
+  try {
+    const { rows } = await pool.query("SELECT * FROM agendamentos WHERE id = $1", [req.params.id]);
+    if (!rows[0]) return res.status(404).json({ erro: "Agendamento não encontrado." });
+    res.json(rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ erro: "Erro interno." });
+  }
 });
 
 // POST /api/agendamentos
-router.post("/", (req, res) => {
-  const { cliente_nome, veiculo, servico, data, hora, tecnico, obs } = req.body;
-  if (!cliente_nome || !servico || !data || !hora) return res.status(400).json({ erro: "Campos obrigatórios: cliente_nome, servico, data, hora." });
+router.post("/", async (req, res) => {
+  try {
+    const { cliente_nome, veiculo, servico, data, hora, tecnico, obs } = req.body;
+    if (!cliente_nome || !servico || !data || !hora) return res.status(400).json({ erro: "Campos obrigatórios: cliente_nome, servico, data, hora." });
 
-  const result = db.prepare(
-    "INSERT INTO agendamentos (cliente_nome, veiculo, servico, data, hora, tecnico, status, obs) VALUES (?,?,?,?,?,?,?,?)"
-  ).run(cliente_nome, veiculo||"", servico, data, hora, tecnico||"", "aguardando", obs||"");
-
-  res.status(201).json(db.prepare("SELECT * FROM agendamentos WHERE id = ?").get(result.lastInsertRowid));
+    const { rows } = await pool.query(
+      "INSERT INTO agendamentos (cliente_nome, veiculo, servico, data, hora, tecnico, status, obs) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *",
+      [cliente_nome, veiculo||"", servico, data, hora, tecnico||"", "aguardando", obs||""]
+    );
+    res.status(201).json(rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ erro: "Erro interno." });
+  }
 });
 
 // PUT /api/agendamentos/:id
-router.put("/:id", (req, res) => {
-  const existing = db.prepare("SELECT * FROM agendamentos WHERE id = ?").get(req.params.id);
-  if (!existing) return res.status(404).json({ erro: "Agendamento não encontrado." });
+router.put("/:id", async (req, res) => {
+  try {
+    const { rows: ex } = await pool.query("SELECT * FROM agendamentos WHERE id = $1", [req.params.id]);
+    if (!ex[0]) return res.status(404).json({ erro: "Agendamento não encontrado." });
+    const existing = ex[0];
 
-  const { cliente_nome, veiculo, servico, data, hora, tecnico, status, obs } = req.body;
-  db.prepare(
-    "UPDATE agendamentos SET cliente_nome=?,veiculo=?,servico=?,data=?,hora=?,tecnico=?,status=?,obs=? WHERE id=?"
-  ).run(
-    cliente_nome||existing.cliente_nome, veiculo??existing.veiculo,
-    servico||existing.servico, data||existing.data, hora||existing.hora,
-    tecnico??existing.tecnico, status||existing.status, obs??existing.obs,
-    req.params.id
-  );
-
-  res.json(db.prepare("SELECT * FROM agendamentos WHERE id = ?").get(req.params.id));
+    const { cliente_nome, veiculo, servico, data, hora, tecnico, status, obs } = req.body;
+    const { rows } = await pool.query(
+      "UPDATE agendamentos SET cliente_nome=$1,veiculo=$2,servico=$3,data=$4,hora=$5,tecnico=$6,status=$7,obs=$8 WHERE id=$9 RETURNING *",
+      [
+        cliente_nome||existing.cliente_nome, veiculo??existing.veiculo,
+        servico||existing.servico, data||existing.data, hora||existing.hora,
+        tecnico??existing.tecnico, status||existing.status, obs??existing.obs,
+        req.params.id
+      ]
+    );
+    res.json(rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ erro: "Erro interno." });
+  }
 });
 
 // PATCH /api/agendamentos/:id/status
-router.patch("/:id/status", (req, res) => {
-  const { status } = req.body;
-  if (!["aguardando","confirmado","concluido","cancelado"].includes(status)) return res.status(400).json({ erro: "Status inválido." });
-  db.prepare("UPDATE agendamentos SET status = ? WHERE id = ?").run(status, req.params.id);
-  res.json({ mensagem: "Status atualizado.", status });
+router.patch("/:id/status", async (req, res) => {
+  try {
+    const { status } = req.body;
+    if (!["aguardando","confirmado","concluido","cancelado"].includes(status)) return res.status(400).json({ erro: "Status inválido." });
+    await pool.query("UPDATE agendamentos SET status = $1 WHERE id = $2", [status, req.params.id]);
+    res.json({ mensagem: "Status atualizado.", status });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ erro: "Erro interno." });
+  }
 });
 
 // DELETE /api/agendamentos/:id
-router.delete("/:id", role("admin"), (req, res) => {
-  const row = db.prepare("SELECT id FROM agendamentos WHERE id = ?").get(req.params.id);
-  if (!row) return res.status(404).json({ erro: "Não encontrado." });
-  db.prepare("DELETE FROM agendamentos WHERE id = ?").run(req.params.id);
-  res.json({ mensagem: "Agendamento removido." });
+router.delete("/:id", role("admin"), async (req, res) => {
+  try {
+    const { rows } = await pool.query("SELECT id FROM agendamentos WHERE id = $1", [req.params.id]);
+    if (!rows[0]) return res.status(404).json({ erro: "Não encontrado." });
+    await pool.query("DELETE FROM agendamentos WHERE id = $1", [req.params.id]);
+    res.json({ mensagem: "Agendamento removido." });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ erro: "Erro interno." });
+  }
 });
 
 module.exports = router;
