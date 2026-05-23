@@ -158,9 +158,5 @@ async function initDb() {
   `);
 }
 
-initDb().catch(err => {
-  console.error("Erro ao inicializar banco de dados:", err.message);
-  process.exit(1);
-});
-
 module.exports = pool;
+module.exports.initDb = initDb;

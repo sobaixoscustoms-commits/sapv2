@@ -136,15 +136,14 @@ async function seed() {
   );
   console.log("✅ Caixa criado");
 
-  console.log("\n🎉 Seed concluído com sucesso!");
-  console.log("   Admin: tacio@sbcustoms.com / admin123");
-  console.log("   Técnico: carlos@sbcustoms.com / carlos123");
-  console.log("   Recepção: marina@sbcustoms.com / marina123");
-
-  await pool.end();
+  console.log("🎉 Seed concluído — Admin: tacio@sbcustoms.com / admin123");
 }
 
-seed().catch(err => {
-  console.error("Erro no seed:", err.message);
-  process.exit(1);
-});
+if (require.main === module) {
+  seed().then(() => pool.end()).catch(err => {
+    console.error("Erro no seed:", err.message);
+    process.exit(1);
+  });
+}
+
+module.exports = seed;
