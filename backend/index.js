@@ -11,8 +11,11 @@ const { initDb } = require("./db");
 const app  = express();
 const PORT = process.env.PORT || 3001;
 
-app.use(cors());
+app.use(cors({ origin: "*", methods: ["GET","POST","PUT","PATCH","DELETE","OPTIONS"] }));
 app.use(express.json());
+
+// Health check para Railway
+app.get("/health", (_req, res) => res.json({ status: "ok" }));
 
 // Rotas da API
 app.use("/api/auth",         require("./routes/auth"));
